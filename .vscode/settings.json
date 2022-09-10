@@ -1,0 +1,11 @@
+{
+  "emeraldwalk.runonsave": {
+    "commands": [
+      // dhall 保存時に Dhall を自動生成するフック
+      { "match": "package.yaml",
+        "isAsync": true,
+        "cmd": "hpack"
+      }
+    ]
+  }
+}
