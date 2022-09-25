@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.34.7.
+-- This file has been generated from package.yaml by hpack version 0.34.6.
 --
 -- see: https://github.com/sol/hpack
 
@@ -25,17 +25,34 @@ source-repository head
 
 library
   exposed-modules:
-      Lib
+      Numeric.Linear.Accelerate
+      Numeric.Linear.Accelerate.Backprop
+      Numeric.Linear.Accelerate.Forward
   other-modules:
-      Paths_accelerate_playground
+      Numeric.Linear.Accelerate.Internal
   hs-source-dirs:
       src
   ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  build-tool-depends:
+      hpack:hpack
   build-depends:
       accelerate
+    , accelerate-blas
+    , accelerate-io
+    , accelerate-io-vector
     , accelerate-llvm
     , accelerate-llvm-ptx
+    , ad-delcont
+    , backprop
     , base >=4.7 && <5
+    , bytestring
+    , lens
+    , massiv
+    , massiv-io
+    , rio
+    , streaming
+    , type-natural
+    , vector
   default-language: Haskell2010
 
 executable accelerate-playground-exe
@@ -44,27 +61,26 @@ executable accelerate-playground-exe
       Paths_accelerate_playground
   hs-source-dirs:
       app
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -fllvm
+  build-tool-depends:
+      hpack:hpack
   build-depends:
       accelerate
+    , accelerate-blas
+    , accelerate-io
+    , accelerate-io-vector
     , accelerate-llvm
     , accelerate-llvm-ptx
     , accelerate-playground
+    , ad-delcont
+    , backprop
     , base >=4.7 && <5
-  default-language: Haskell2010
-
-test-suite accelerate-playground-test
-  type: exitcode-stdio-1.0
-  main-is: Spec.hs
-  other-modules:
-      Paths_accelerate_playground
-  hs-source-dirs:
-      test
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
-  build-depends:
-      accelerate
-    , accelerate-llvm
-    , accelerate-llvm-ptx
-    , accelerate-playground
-    , base >=4.7 && <5
+    , bytestring
+    , lens
+    , massiv
+    , massiv-io
+    , rio
+    , streaming
+    , type-natural
+    , vector
   default-language: Haskell2010

@@ -2,10 +2,12 @@
   "emeraldwalk.runonsave": {
     "commands": [
       // dhall 保存時に Dhall を自動生成するフック
-      { "match": "package.yaml",
+      { "match": "(package\\.yaml|\\.l?hs(ig)?)$",
         "isAsync": true,
-        "cmd": "hpack"
+        "cmd": "/sqfs/home/z6b161/.cabal/bin/hpack"
       }
     ]
-  }
+  },
+  "editor.formatOnSave": true,
+  "haskell.formattingProvider": "fourmolu"
 }
