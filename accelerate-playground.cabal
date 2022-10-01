@@ -43,6 +43,7 @@ library
     , accelerate-io
     , accelerate-io-vector
     , accelerate-llvm
+    , accelerate-llvm-native
     , accelerate-llvm-ptx
     , ad-delcont
     , backprop
@@ -58,6 +59,7 @@ library
     , reflection
     , rio
     , streaming
+    , strict
     , type-natural
     , vector
   default-language: Haskell2010
@@ -77,6 +79,7 @@ executable accelerate-playground-exe
     , accelerate-io
     , accelerate-io-vector
     , accelerate-llvm
+    , accelerate-llvm-native
     , accelerate-llvm-ptx
     , accelerate-playground
     , ad-delcont
@@ -93,6 +96,7 @@ executable accelerate-playground-exe
     , reflection
     , rio
     , streaming
+    , strict
     , type-natural
     , vector
   default-language: Haskell2010
@@ -112,6 +116,7 @@ executable mnist
     , accelerate-io
     , accelerate-io-vector
     , accelerate-llvm
+    , accelerate-llvm-native
     , accelerate-llvm-ptx
     , accelerate-playground
     , ad-delcont
@@ -135,6 +140,7 @@ executable mnist
     , rio
     , streaming
     , streaming-bytestring
+    , strict
     , type-natural
     , vector
   default-language: Haskell2010

@@ -20,10 +20,11 @@ import Control.Applicative (optional)
 import Control.Arrow ((>>>))
 import qualified Control.Foldl as L
 import Control.Monad (when)
+import Control.Monad.Trans.Resource (MonadResource, runResourceT)
 import qualified Data.Array.Accelerate as A
 import qualified Data.Array.Accelerate.IO.Data.Vector.Unboxed as VA
-import qualified Data.Array.Accelerate.Interpreter as AI
-import qualified Data.Array.Accelerate.LLVM.PTX as GPU
+import qualified Data.Array.Accelerate.LLVM.PTX as Backend
+-- import qualified Data.Array.Accelerate.LLVM.Native as Backend
 import Data.Format.MNIST
 import Data.Function ((&))
 import Data.Functor.Of (Of)
@@ -34,7 +35,9 @@ import qualified Data.Massiv.Array as MA
 import qualified Data.Massiv.Vector as MV
 import qualified Data.Massiv.Vector as VM
 import Data.Proxy (Proxy)
+import Data.Strict.Tuple (Pair (..))
 import qualified Data.Vector as V
+import qualified Data.Vector.Fusion.Bundle.Monadic as B
 import qualified Data.Vector.Unboxed as U
 import DeepLearning.Accelerate
 import GHC.Generics (Generic)
@@ -42,23 +45,22 @@ import GHC.TypeNats
 import Numeric.Linear.Accelerate
 import Numeric.Natural (Natural)
 import qualified Options.Applicative as Opts
-import RIO (MonadTrans (..), NFData (..), PrimMonad, fromMaybe, liftIO)
+import RIO (MonadTrans (..), NFData (..), PrimMonad, evaluateDeep, fromMaybe, liftIO)
 import RIO.FilePath ((</>))
 import qualified Streaming as SS
 import qualified Streaming.ByteString as Q
 import qualified Streaming.Prelude as S
-import System.Random (getStdGen)
-import System.Random.Stateful (RandomGenM, UniformRange (..), freezeGen, newAtomicGenM)
+import System.Random (RandomGen (split), getStdGen)
+import System.Random.Stateful (AtomicGen (..), RandomGenM, UniformRange (..), newAtomicGenM, thawGen)
 import Text.Printf
-import UnliftIO.Resource (MonadResource, runResourceT)
 
 data TrainOpts = TrainOpts
   { trainPath, testPath :: !FilePath
   , epoch :: !Int
   , batchSize :: !Int
   , outputInterval :: !Int
-  , timeStep :: !Double
-  , dumping :: !Double
+  , timeStep :: !Float
+  , dumping :: !Float
   , digitsDir :: !(Maybe FilePath)
   }
   deriving (Show, Eq, Ord, Generic)
@@ -68,20 +70,67 @@ main = do
   trOpts@TrainOpts {..} <- Opts.execParser trainOptsP
   print trOpts
   gen <- getStdGen
-  glbGen <- newAtomicGenM gen
+  let (nnGen, g') = split gen
+      seed = AtomicGen g'
 
-  nn0 <- randomNN @Pixels @BatchedNet @10 @Float glbGen
-  seed <- freezeGen glbGen
-  runResourceT $ do
-    (testInfo, st) <- loadDataSetStream testPath
-    liftIO $ print testInfo
-    acc <-
-      st & SS.chunksOf batchSize
-        & S.mapped (L.impurely S.foldM $ someCasesL testInfo)
-        & S.map (toAccuracyStat nn0)
-        & L.purely S.fold_ (L.foldMap id accuracy)
-    liftIO $ putStrLn $ printf "Initial accuracy %f%%" (acc * 100)
+  nn0 <- randomNN @Pixels @BatchedNet @10 @Float =<< newAtomicGenM nnGen
+  !acc <- calcAccuracy batchSize testPath nn0
+  liftIO $ putStrLn $ printf "Initial accuracy %f%%" (acc * 100)
+  hdr@ImageFileHeader {..} <-
+    evaluateDeep =<< runResourceT (fst <$> loadDataSetStream trainPath)
+  let (!numBat0, over) = fromIntegral imageCount `quotRem` batchSize
+      numBatches
+        | over == 0 = numBat0
+        | otherwise = numBat0 + 1
+      (!epochGroup, !r) = epoch `quotRem` outputInterval
+      !shuffWindow = batchSize * max 1 (numBatches `quot` 100)
+      lo
+        | r == 0 = B.empty
+        | otherwise = B.singleton r
+  putStrLn $ printf "Training with %d cases for %d epochs, divided into %d mini-batches, each of size %d" imageCount epoch numBatches batchSize
+  B.foldlM'
+    ( \(cur :!: net) eps -> do
+        let !cur' = cur + eps
+        putStrLn $ printf "Epoch %d..%d started." cur cur'
+        !net' <-
+          B.foldlM'
+            ( \curNN () -> do
+                g <- thawGen seed
+                runResourceT $ do
+                  (_, st) <- loadDataSetStream trainPath
+                  st
+                    & shuffleBuffered' g shuffWindow
+                    & SS.chunksOf batchSize
+                    & S.mapped (L.impurely S.foldM $ someCasesL hdr)
+                    & S.fold_ (flip $ trainMNIST trOpts) curNN id
+            )
+            net
+            (B.replicate eps ())
+        putStrLn $ printf "Epoch %d Done." cur'
+        acc' <- calcAccuracy batchSize testPath net'
+        putStrLn $ printf "Test Accuracy at Epoch %d: %f%%" cur' (acc' * 100)
+        pure $! (cur + eps) :!: net'
+    )
+    (0 :!: nn0)
+    (B.replicate epochGroup outputInterval B.++ lo)
   pure ()
+
+trainMNIST ::
+  KnownNetwork 784 ns 10 =>
+  TrainOpts ->
+  SomeCases 784 10 ->
+  NeuralNetwork 784 ns 10 RawTensor Float ->
+  NeuralNetwork 784 ns 10 RawTensor Float
+trainMNIST TrainOpts {..} (MkSomeCases inps exps _) =
+  trainGDWith Backend.run timeStep dumping 1 crossEntropy (inps, exps)
+
+calcAccuracy :: Int -> FilePath -> NeuralNetwork 784 BatchedNet 10 RawTensor Float -> IO Double
+calcAccuracy size fp nn = runResourceT $ do
+  (testInfo, st) <- loadDataSetStream fp
+  st & SS.chunksOf size
+    & S.mapped (L.impurely S.foldM $ someCasesL testInfo)
+    & S.map (toAccuracyStat nn)
+    & L.purely S.fold_ (L.foldMap id accuracy)
 
 data AccuracyStatistics = AS {count :: !Int, correct :: !Int}
   deriving (Show, Eq, Ord, Generic)
@@ -110,7 +159,7 @@ toAccuracyStat nn (MkSomeCases inps _ exps) =
                   else (idx, w)
             )
             (D0, -1 / 0)
-            $ fromRawAccMatrix $ evalNNWith GPU.run1 nn inps
+            $ fromRawAccMatrix $ evalNNWith Backend.run1 nn inps
    in M.foldMono (\p -> AS {count = 1, correct = if p then 1 else 0}) $
         M.zipWith (==) preds exps
 
@@ -128,41 +177,11 @@ type BatchedNet =
    , L ( 'Act 'Softmax) 10
    ]
 
-type AImage = A.Vector Float
-
-toAImage :: Image -> AImage
-toAImage =
-  VA.fromUnboxed . M.toUnboxedVector . M.computeP
-    . M.map (subtract 0.5 . (/ 255) . realToFrac)
-
 labelsFile, imagesFile :: FilePath
 labelsFile = "labels.mnist"
 imagesFile = "images.mnist"
 
-batchFold ::
-  Monad m =>
-  Int ->
-  L.FoldM m a b ->
-  S.Stream (Of a) m r ->
-  S.Stream (Of b) m r
-batchFold size fld =
-  SS.chunksOf size
-    >>> S.mapped (L.impurely S.foldM fld)
-
 type Pixels = 28 * 28
-
-data FoldMap a b where
-  FoldMap :: (w -> w -> w) -> !w -> (a -> w) -> (w -> b) -> FoldMap a b
-
-pooledFoldMap :: MonadUnliftIO m => Int -> FoldMap a b -> S.Stream (Of a) m r -> m b
-pooledFoldMap size (FoldMap reduce zero mapper extract) =
-  SS.chunksOf size
-    >>> S.mapped (L.purely S.fold (L.Fold (\x -> reduce x . mapper) zero id))
-    >>> L.purely S.fold_ (L.Fold reduce zero extract)
-
-toFold :: FoldMap a b -> L.Fold a b
-{-# INLINE toFold #-}
-toFold (FoldMap reduce zero to from) = L.Fold (\x -> reduce x . to) zero from
 
 someCasesL ::
   PrimMonad m =>
@@ -178,8 +197,8 @@ someCasesL ImageFileHeader {..} =
     mkSomeCase :: Natural -> V.Vector Image -> U.Vector Digit -> SomeCases Pixels 10
     mkSomeCase 0 _ ds =
       MkSomeCases @0
-        (runTensor AI.run $ repeated 0)
-        (runTensor AI.run $ repeated 0)
+        (repeatRaw 0)
+        (repeatRaw 0)
         (MV.fromUnboxedVector M.Par ds)
     mkSomeCase m ins outs =
       case (someNatVal m, someNatVal $ fromIntegral pixels) of
@@ -217,17 +236,11 @@ toRawTensor' lab arr =
 
 massivToAccel :: M.Matrix M.U Float -> A.Array A.DIM2 Float
 massivToAccel mmat =
-  GPU.run
+  Backend.run
     . A.reshape (A.constant $ toMatShape $ M.size mmat)
     . A.use
     . VA.fromUnboxed
     $ M.toUnboxedVector mmat
-
-type ToMassivShape sh = M.Ix sh
-
-type family ToMassivShape' a where
-  ToMassivShape' A.Z = 0
-  ToMassivShape' (f A.:. Int) = 1 + ToMassivShape' f
 
 toMatShape :: MA.Sz MA.Ix2 -> A.DIM2
 toMatShape (M.Sz2 l r) = A.Z A.:. l A.:. r

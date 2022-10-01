@@ -84,8 +84,7 @@ deriving instance (KnownDims dims, Elt a) => Show (AccTensor dims a)
 
 type KnownDims :: [Nat] -> Constraint
 class
-  ( Lift Exp (ToShape dims)
-  , Plain (ToShape dims) ~ ToShape dims
+  ( Plain (ToShape dims) ~ ToShape dims
   , Elt (Plain (ToShape dims))
   , Shape (ToShape dims)
   , Slice (ToShape dims)
@@ -240,3 +239,7 @@ instance
   {-# INLINE (*^) #-}
   (>.<) = fmap (foldTensor (+) 0) . zipTensorWith (*)
   {-# INLINE (>.<) #-}
+  reps = repeatedScalar
+  {-# INLINE reps #-}
+  sums = foldTensor (+) 0
+  {-# INLINE sums #-}

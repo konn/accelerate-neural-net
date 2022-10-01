@@ -34,6 +34,7 @@ module DeepLearning.Accelerate
     Spec (..),
     type L,
     type Skip,
+    crossEntropy,
     evalNNWith,
     evalNNA,
     randomNN,
@@ -63,6 +64,7 @@ module DeepLearning.Accelerate
     trainGDWith,
     Network (..),
     zipNetworkWith,
+    mapNetwork,
     traverseNetwork,
     LayerKindProxy (..),
     NetworkShape (.., IsOutput, IsCons, IsSkip),
@@ -73,6 +75,7 @@ module DeepLearning.Accelerate
   )
 where
 
+import Control.Arrow ((>>>))
 import Control.Lens hiding (repeated)
 import Data.Array.Accelerate (Acc, Arrays)
 import qualified Data.Array.Accelerate as A
@@ -312,7 +315,7 @@ instance
   {-# INLINE (^+^) #-}
 
 instance
-  (A.Num a, KnownNat i, KnownNat o) =>
+  (A.Num a, KnownLayerKind l i o) =>
   VectorSpace (AccScalar a) (Weights l i o AccTensor a)
   where
   c *^ (AffineW aw) = AffineW $ c *^ aw
@@ -327,6 +330,19 @@ instance
   (BatchnormW bnw) >.< (BatchnormW bnw') = bnw >.< bnw'
   (LayernormW lnw) >.< (LayernormW lnw') = lnw >.< lnw'
   {-# INLINE (>.<) #-}
+  sums (AffineW aw) = sums aw
+  sums (LinearW lw) = sums lw
+  sums ActivateW = 0
+  sums (BatchnormW bnw) = sums bnw
+  sums (LayernormW lnw) = sums lnw
+  {-# INLINE sums #-}
+  reps = case sLayerKind @l @i @o of
+    SAff -> AffineW . reps
+    SLin -> LinearW . reps
+    SAct {} -> const ActivateW
+    SBatN -> BatchnormW . reps
+    SLayN -> LayernormW . reps
+  {-# INLINE reps #-}
 
 instance
   (forall l x y. KnownLayerKind l x y => Additive (h l x y tensor a)) =>
@@ -340,6 +356,7 @@ instance
 instance
   ( forall l x y. KnownLayerKind l x y => VectorSpace c (h l x y tensor a)
   , forall l x y. KnownLayerKind l x y => Additive (h l x y tensor a)
+  , KnownNetwork i is o
   , Num c
   ) =>
   VectorSpace c (Network h i is o tensor a)
@@ -352,6 +369,24 @@ instance
   (h :- net) >.< (h' :- net') = h >.< h' + net >.< net'
   (blk ::- net) >.< (blk' ::- net') = blk >.< blk' + net >.< net'
   {-# INLINE (>.<) #-}
+  sums = go 0
+    where
+      go :: c -> Network h x ls y tensor a -> c
+      go !acc Output = acc
+      go !acc (h :- net') = go (acc + sums h) net'
+      go !acc (blk ::- net') = go (go acc blk) net'
+  {-# INLINE sums #-}
+  reps =
+    traverseNetwork
+      ( getLayerKind >>> \case
+          SAff -> reps
+          SLin -> reps
+          SAct {} -> reps
+          SBatN -> reps
+          SLayN -> reps
+      )
+      (unSkeleton networkShape)
+  {-# INLINE reps #-}
 
 data Pass = Train | Eval
   deriving (Show, Eq, Ord, Generic)
@@ -788,7 +823,19 @@ pattern IsSkip inner rest <-
 
 {-# COMPLETE IsOutput, IsCons, IsSkip :: NetworkShape #-}
 
-type KnownNetwork i hs o = (KnownNat i, Given (NetworkShape i hs o), KnownNat o)
+type KnownNetwork i hs o =
+  ( KnownNat i
+  , KnownNetwork' i hs o
+  , Given (NetworkShape i hs o)
+  , KnownNat o
+  )
+
+type family KnownNetwork' i hs o where
+  KnownNetwork' i '[] o = i ~ o
+  KnownNetwork' i (L l k ': ls) o =
+    (KnownLayerKind l i k, KnownNetwork k ls o)
+  KnownNetwork' i (Skip (u ': ins) ': ls) o =
+    (KnownNetwork i (u ': ins) i, KnownNetwork i ls o)
 
 networkShape :: KnownNetwork i hs o => NetworkShape i hs o
 networkShape = given
@@ -1013,11 +1060,10 @@ evalNNWith runner = runTensor1 runner . evalNNA . useTensors
 
 trainGDA ::
   ( KnownNat m
-  , KnownNat i
-  , KnownNat o
   , AB.Numeric a
   , A.Ord a
   , A.Floating a
+  , KnownNetwork i ls o
   ) =>
   -- | Learning rate (dt)
   AccScalar a ->
@@ -1041,8 +1087,7 @@ trainGDA dt alpha n loss dataSet = last . take (n + 1) . iterate' step
 
 trainGDWith ::
   ( KnownNat m
-  , KnownNat i
-  , KnownNat o
+  , KnownNetwork i ls o
   , AB.Numeric a
   , A.Ord a
   , A.Floating a
@@ -1096,6 +1141,24 @@ traverseNetwork f = go
     go Output = pure Output
     go (h :- net') = (:-) <$> f h <*> go net'
     go (blk ::- net') = (::-) <$> go blk <*> go net'
+
+mapNetwork ::
+  forall h g t t' a b i ls o.
+  ( forall l x y.
+    KnownLayerKind l x y =>
+    h l x y t a ->
+    g l x y t' b
+  ) ->
+  Network h i ls o t a ->
+  Network g i ls o t' b
+{-# INLINE mapNetwork #-}
+mapNetwork f = go
+  where
+    {-# INLINEABLE go #-}
+    go :: Network h x hs y t a -> Network g x hs y t' b
+    go Output = Output
+    go (h :- net') = f h :- go net'
+    go (blk ::- net') = go blk ::- go net'
 
 traverseNetworkWithTail ::
   forall h g t t' a b i ls o f.
@@ -1181,3 +1244,7 @@ randomNN g = do
         BatchnormParams
           BatchNormAuxParams {mean = repeatRaw 0, variance = repeatRaw 1}
     goP (LayerKindProxy SLayN) = pure LayernormParams
+
+crossEntropy :: (KnownNat m, KnownNat o, A.Floating a) => LossFunction m o a
+{-# INLINE crossEntropy #-}
+crossEntropy yPred yTruth = sums $ yTruth * log yPred

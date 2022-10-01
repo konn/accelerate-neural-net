@@ -8,4 +8,4 @@ set -euxo pipefail
 module load BaseCPU BaseGPU
 WORK_DIR="$(readlink -f /sqfs/work/hp220285/z6b161)"
 export SINGULARITY_BIND="${WORK_DIR},${PBS_O_WORKDIR}"
-singularity run --nv "/sqfs/work/hp220285/z6b161/accelerate-singularity-sandbox/devenv.sif" cabal v2-exec -- mnist
+time singularity run --nv "/sqfs/work/hp220285/z6b161/accelerate-singularity-sandbox/devenv.sif" cabal v2-exec -- mnist +RTS -s

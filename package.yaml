@@ -27,6 +27,7 @@ dependencies:
 - accelerate-io-vector
 - accelerate-llvm
 - accelerate-llvm-ptx
+- accelerate-llvm-native
 - ad-delcont
 - backprop
 - bytestring
@@ -39,6 +40,7 @@ dependencies:
 - reflection
 - rio
 - streaming
+- strict
 - type-natural
 - vector
 - lens
