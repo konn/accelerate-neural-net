@@ -30,8 +30,13 @@ dependencies:
 - ad-delcont
 - backprop
 - bytestring
+- generic-lens
+- heaps
 - massiv
 - massiv-io
+- random
+- mwc-random
+- reflection
 - rio
 - streaming
 - type-natural
@@ -57,13 +62,40 @@ library:
   source-dirs: src
 
 executables:
+  mnist:
+    main: Main.hs
+    source-dirs: app/mnist
+    ghc-options:
+    - -O2
+    - -rtsopts
+    - -threaded
+    - -with-rtsopts=-N
+    - -fllvm
+    dependencies:
+    - accelerate-playground
+    - accelerate-io
+    - accelerate-io-vector
+    - compact
+    - filepath
+    - foldl
+    - massiv
+    - massiv-io
+    - mnist-core
+    - optparse-applicative
+    - resourcet
+    - rio
+    - streaming
+    - streaming-bytestring
+    - vector
+
   accelerate-playground-exe:
     main:                Main.hs
-    source-dirs:         app
+    source-dirs:         app/playground
     ghc-options:
-    - -threaded
+    - -O2
     - -rtsopts
-    - -with-rtsopts=-N
+    - -threaded
+    - -with-rtsopts=-N16
     - -fllvm
     dependencies:
     - accelerate-playground

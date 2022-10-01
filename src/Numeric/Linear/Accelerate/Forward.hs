@@ -19,6 +19,7 @@
 module Numeric.Linear.Accelerate.Forward
   ( (!.!),
     (.*),
+    (/.),
     (!*),
     (!*!),
     (><),
@@ -33,6 +34,7 @@ module Numeric.Linear.Accelerate.Forward
   )
 where
 
+import Control.Lens (Profunctor (..))
 import Data.Array.Accelerate hiding (transpose)
 import qualified Data.Array.Accelerate as A
 import qualified Data.Array.Accelerate.Numeric.LinearAlgebra as ABlas
@@ -49,6 +51,8 @@ infixr 8 !.!
 (!.!) = fmap (foldTensor (+) 0) . zipTensorWith (*)
 
 infixr 8 .*
+
+infixl 8 /.
 
 infixl 8 !*, !*!
 
@@ -68,6 +72,15 @@ infixl 8 !*, !*!
   AccTensor dims a
 {-# INLINE (.*) #-}
 (.*) = coerce $ A.zipWith (*) . A.replicate (constant $ theShape @dims)
+
+(/.) ::
+  forall dims a.
+  (KnownDims dims, A.Fractional a) =>
+  AccTensor dims a ->
+  AccScalar a ->
+  AccTensor dims a
+{-# INLINE (/.) #-}
+(/.) = coerce $ lmap (A.replicate (constant $ theShape @dims)) . A.zipWith (/)
 
 sumRows :: (A.Num a) => AccMatrix n m a -> AccVector m a
 {-# INLINE sumRows #-}

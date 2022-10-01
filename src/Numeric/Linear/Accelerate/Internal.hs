@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
@@ -17,7 +18,7 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE UndecidableSuperClasses #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
-{-# OPTIONS_GHC -fllvm -funbox-strict-fields -Wno-orhpans #-}
+{-# OPTIONS_GHC -fllvm -funbox-strict-fields #-}
 
 module Numeric.Linear.Accelerate.Internal
   ( ToShape,
@@ -25,7 +26,10 @@ module Numeric.Linear.Accelerate.Internal
     RawTensor (..),
     KnownDims (..),
     SDims (..),
+    sizeDims,
     repeatedScalar,
+    repeatRaw,
+    asScalar,
     dimVal,
     repeatedExp,
     mapTensor,
@@ -40,6 +44,8 @@ import Data.Kind (Constraint, Type)
 import Data.Proxy (Proxy (..))
 import Data.Type.Natural
 import Numeric.Backprop (Backprop (..))
+import Numeric.Linear.VectorSpace
+import RIO (NFData)
 import Prelude as P
 
 dimVal :: forall n. KnownNat n => Int
@@ -60,6 +66,11 @@ deriving instance P.Ord (SDims ns)
 
 newtype RawTensor dims a = RawTensor (Array (ToShape dims) a)
 
+deriving newtype instance (KnownDims dims, A.Elt a) => NFData (RawTensor dims a)
+
+deriving newtype instance
+  (KnownDims dims, A.Elt a) => Arrays (RawTensor dims a)
+
 type ToShape :: [Nat] -> Type
 type family ToShape dims where
   ToShape '[] = Z
@@ -78,12 +89,20 @@ class
   , Elt (Plain (ToShape dims))
   , Shape (ToShape dims)
   , Slice (ToShape dims)
+  , P.Eq (CoSliceShape (CoSliceShape (ToShape dims)))
   , KnownDims' dims
   ) =>
   KnownDims dims
   where
   sDims :: SDims dims
   theShape :: ToShape dims
+
+sizeDims :: forall dims. KnownDims dims => Int
+sizeDims = go $ sDims @dims
+  where
+    go :: SDims ds -> Int
+    go SZ = 1
+    go (sn :% sd') = P.fromIntegral (toNatural sn) * go sd'
 
 instance KnownDims '[] where
   sDims = SZ
@@ -185,6 +204,9 @@ zipTensorWith ::
   AccTensor dims c
 zipTensorWith = coerce $ A.zipWith @(ToShape dims)
 
+repeatRaw :: forall dims a. (KnownDims dims, Elt a) => a -> RawTensor dims a
+repeatRaw = RawTensor . A.fromList (theShape @dims) . repeat
+
 repeatedExp :: forall dims a. (KnownDims dims, Elt a) => Exp a -> AccTensor dims a
 {-# INLINE repeatedExp #-}
 repeatedExp = AccTensor . A.fill (A.constant $ theShape @dims)
@@ -192,6 +214,9 @@ repeatedExp = AccTensor . A.fill (A.constant $ theShape @dims)
 repeatedScalar :: forall dims a. (KnownDims dims, Elt a) => AccTensor '[] a -> AccTensor dims a
 {-# INLINE repeatedScalar #-}
 repeatedScalar = AccTensor . A.fill (A.constant $ theShape @dims) . A.the . coerce
+
+asScalar :: Elt a => a -> AccTensor '[] a
+asScalar = AccTensor . A.unit . A.constant
 
 foldTensor ::
   forall dims a.
@@ -202,3 +227,16 @@ foldTensor ::
   AccTensor '[] a
 {-# INLINE foldTensor #-}
 foldTensor = coerce $ foldAll @(ToShape dims)
+
+instance (KnownDims dims, A.Num a) => Additive (AccTensor dims a) where
+  (^+^) = (+)
+  {-# INLINE (^+^) #-}
+
+instance
+  (KnownDims dims, A.Num a) =>
+  VectorSpace (AccTensor '[] a) (AccTensor dims a)
+  where
+  (*^) = coerce $ A.zipWith (*) . A.replicate (constant $ theShape @dims)
+  {-# INLINE (*^) #-}
+  (>.<) = fmap (foldTensor (+) 0) . zipTensorWith (*)
+  {-# INLINE (>.<) #-}

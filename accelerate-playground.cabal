@@ -25,9 +25,11 @@ source-repository head
 
 library
   exposed-modules:
+      DeepLearning.Accelerate
       Numeric.Linear.Accelerate
       Numeric.Linear.Accelerate.Backprop
       Numeric.Linear.Accelerate.Forward
+      Numeric.Linear.VectorSpace
   other-modules:
       Numeric.Linear.Accelerate.Internal
   hs-source-dirs:
@@ -46,9 +48,14 @@ library
     , backprop
     , base >=4.7 && <5
     , bytestring
+    , generic-lens
+    , heaps
     , lens
     , massiv
     , massiv-io
+    , mwc-random
+    , random
+    , reflection
     , rio
     , streaming
     , type-natural
@@ -60,8 +67,8 @@ executable accelerate-playground-exe
   other-modules:
       Paths_accelerate_playground
   hs-source-dirs:
-      app
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N -fllvm
+      app/playground
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -rtsopts -threaded -with-rtsopts=-N16 -fllvm
   build-tool-depends:
       hpack:hpack
   build-depends:
@@ -76,11 +83,58 @@ executable accelerate-playground-exe
     , backprop
     , base >=4.7 && <5
     , bytestring
+    , generic-lens
+    , heaps
     , lens
     , massiv
     , massiv-io
+    , mwc-random
+    , random
+    , reflection
     , rio
     , streaming
+    , type-natural
+    , vector
+  default-language: Haskell2010
+
+executable mnist
+  main-is: Main.hs
+  other-modules:
+      Paths_accelerate_playground
+  hs-source-dirs:
+      app/mnist
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -rtsopts -threaded -with-rtsopts=-N -fllvm
+  build-tool-depends:
+      hpack:hpack
+  build-depends:
+      accelerate
+    , accelerate-blas
+    , accelerate-io
+    , accelerate-io-vector
+    , accelerate-llvm
+    , accelerate-llvm-ptx
+    , accelerate-playground
+    , ad-delcont
+    , backprop
+    , base >=4.7 && <5
+    , bytestring
+    , compact
+    , filepath
+    , foldl
+    , generic-lens
+    , heaps
+    , lens
+    , massiv
+    , massiv-io
+    , mnist-core
+    , mwc-random
+    , optparse-applicative
+    , random
+    , reflection
+    , resourcet
+    , rio
+    , streaming
+    , streaming-bytestring
     , type-natural
     , vector
   default-language: Haskell2010

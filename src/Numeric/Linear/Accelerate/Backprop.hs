@@ -20,6 +20,7 @@ module Numeric.Linear.Accelerate.Backprop
   ( module Numeric.Linear.Accelerate,
     (!.!),
     (.*),
+    (/.),
     (!*),
     (!*!),
     (><),
@@ -72,6 +73,18 @@ infixr 8 .*
 (.*) = liftOp2 $
   op2 $ \c v ->
     (c F..* v, \dz -> (dz F.!.! v, c F..* dz))
+
+infixl 8 /.
+
+(/.) ::
+  (KnownDims dims, A.Fractional a, Reifies s W) =>
+  BVar s (AccTensor dims a) ->
+  BVar s (AccScalar a) ->
+  BVar s (AccTensor dims a)
+{-# INLINE (/.) #-}
+(/.) = liftOp2 $
+  op2 $ \v c ->
+    (v F./. c, \dz -> (dz F./. c, (- dz F.!.! v) F./. (c * c)))
 
 infixl 8 !*, !*!
 
