@@ -141,7 +141,7 @@ deriving anyclass instance
   Additive (AffineWeights i o AccTensor a)
 
 deriving anyclass instance
-  (A.Num a, KnownNat i, KnownNat o) =>
+  (A.Num a, A.FromIntegral Int a, KnownNat i, KnownNat o) =>
   VectorSpace (AccScalar a) (AffineWeights i o AccTensor a)
 
 deriving anyclass instance
@@ -182,7 +182,7 @@ deriving anyclass instance
   Additive (LinearWeights i o AccTensor a)
 
 deriving anyclass instance
-  (A.Num a, KnownNat i, KnownNat o) =>
+  (A.Num a, A.FromIntegral Int a, KnownNat i, KnownNat o) =>
   VectorSpace (AccScalar a) (LinearWeights i o AccTensor a)
 
 deriving anyclass instance
@@ -220,7 +220,7 @@ deriving anyclass instance
   Additive (BatchNormWeights o AccTensor a)
 
 deriving anyclass instance
-  (A.Num a, KnownNat o) =>
+  (A.Num a, A.FromIntegral Int a, KnownNat o) =>
   VectorSpace (AccScalar a) (BatchNormWeights o AccTensor a)
 
 deriving anyclass instance
@@ -258,7 +258,7 @@ deriving anyclass instance
   Additive (BatchNormAuxParams o AccTensor a)
 
 deriving anyclass instance
-  (A.Num a, KnownNat o) =>
+  (A.Num a, A.FromIntegral Int a, KnownNat o) =>
   VectorSpace (AccScalar a) (BatchNormAuxParams o AccTensor a)
 
 deriving anyclass instance
@@ -296,7 +296,7 @@ deriving anyclass instance
   Additive (LayerNormWeights o AccTensor a)
 
 deriving anyclass instance
-  (A.Num a, KnownNat o) =>
+  (A.Num a, A.FromIntegral Int a, KnownNat o) =>
   VectorSpace (AccScalar a) (LayerNormWeights o AccTensor a)
 
 deriving anyclass instance
@@ -315,7 +315,7 @@ instance
   {-# INLINE (^+^) #-}
 
 instance
-  (A.Num a, KnownLayerKind l i o) =>
+  (A.Num a, A.FromIntegral Int a, KnownLayerKind l i o) =>
   VectorSpace (AccScalar a) (Weights l i o AccTensor a)
   where
   c *^ (AffineW aw) = AffineW $ c *^ aw
@@ -710,6 +710,8 @@ runLayer ::
   , KnownNat m
   , KnownNat i
   , KnownNat o
+  , A.FromIntegral Int a
+  , A.ToFloating Double a
   ) =>
   Pass ->
   AuxParams l i o AccTensor a ->
@@ -764,7 +766,7 @@ runLayer pass =
           x' = duplicateAsCols (ws ^^. #scale) * xHat + duplicateAsCols (ws ^^. #shift)
        in T2 x' (auto l)
 
-applyActivation :: (KnownNat m, KnownNat i, A.Ord a, A.Floating a, Reifies s W) => SActivation act -> BVar s (AccMatrix m i a) -> BVar s (AccMatrix m i a)
+applyActivation :: (KnownNat m, KnownNat i, A.Ord a, A.Floating a, Reifies s W, A.ToFloating Double a, A.FromIntegral Int a) => SActivation act -> BVar s (AccMatrix m i a) -> BVar s (AccMatrix m i a)
 applyActivation SReLU = relu
 applyActivation SSigmoid = sigmoid
 applyActivation SSoftmax = softmax
@@ -960,6 +962,8 @@ runNN ::
   , A.Floating a
   , AB.Numeric a
   , A.Ord a
+  , A.FromIntegral Int a
+  , A.ToFloating Double a
   ) =>
   Pass ->
   Network AuxParams i hs o AccTensor a ->
@@ -1000,7 +1004,7 @@ type LossFunction m o a =
   forall s. Reifies s W => BVar s (AccMatrix m o a) -> BVar s (AccMatrix m o a) -> BVar s (AccScalar a)
 
 gradNN ::
-  (A.Floating a, KnownNat m, KnownNat i, KnownNat o, AB.Numeric a, A.Ord a) =>
+  (A.Floating a, KnownNat m, KnownNat i, KnownNat o, AB.Numeric a, A.Ord a, A.FromIntegral Int a, A.ToFloating Double a) =>
   LossFunction m o a ->
   (AccMatrix m i a, AccMatrix m o a) ->
   Network AuxParams i ls o AccTensor a ->
@@ -1033,6 +1037,8 @@ evalNNA ::
   , AB.Numeric a
   , A.Ord a
   , A.Floating a
+  , A.FromIntegral Int a
+  , A.ToFloating Double a
   ) =>
   NeuralNetwork i ls o AccTensor a ->
   AccMatrix m i a ->
@@ -1050,6 +1056,8 @@ evalNNWith ::
   , AB.Numeric a
   , A.Ord a
   , A.Floating a
+  , A.FromIntegral Int a
+  , A.ToFloating Double a
   ) =>
   (forall x y. (Arrays x, Arrays y) => (Acc x -> Acc y) -> x -> y) ->
   NeuralNetwork i ls o RawTensor a ->
@@ -1064,6 +1072,8 @@ trainGDA ::
   , A.Ord a
   , A.Floating a
   , KnownNetwork i ls o
+  , A.FromIntegral Int a
+  , A.ToFloating Double a
   ) =>
   -- | Learning rate (dt)
   AccScalar a ->
@@ -1091,6 +1101,8 @@ trainGDWith ::
   , AB.Numeric a
   , A.Ord a
   , A.Floating a
+  , A.FromIntegral Int a
+  , A.ToFloating Double a
   ) =>
   (forall arrays. Arrays arrays => Acc arrays -> arrays) ->
   -- | Learning rate (dt)
@@ -1110,7 +1122,7 @@ trainGDWith runner dt alpha n loss (ins, ous) =
     . useTensors
 
 updateAuxParams ::
-  (KnownNat i, A.Num a) =>
+  (KnownNat i, A.Num a, A.FromIntegral Int a) =>
   AccScalar a ->
   AuxParams l i o AccTensor a ->
   AuxParams l i o AccTensor a ->
@@ -1245,6 +1257,6 @@ randomNN g = do
           BatchNormAuxParams {mean = repeatRaw 0, variance = repeatRaw 1}
     goP (LayerKindProxy SLayN) = pure LayernormParams
 
-crossEntropy :: (KnownNat m, KnownNat o, A.Floating a) => LossFunction m o a
+crossEntropy :: (KnownNat m, KnownNat o, A.Floating a, A.FromIntegral Int a, A.ToFloating Double a) => LossFunction m o a
 {-# INLINE crossEntropy #-}
 crossEntropy yPred yTruth = sums $ yTruth * log yPred

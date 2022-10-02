@@ -34,7 +34,7 @@ library
       Numeric.Linear.Accelerate.Internal
   hs-source-dirs:
       src
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2
   build-tool-depends:
       hpack:hpack
   build-depends:
@@ -70,7 +70,7 @@ executable accelerate-playground-exe
       Paths_accelerate_playground
   hs-source-dirs:
       app/playground
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -rtsopts -threaded -with-rtsopts=-N16
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -O2 -rtsopts -threaded -with-rtsopts=-N16
   build-tool-depends:
       hpack:hpack
   build-depends:
@@ -107,19 +107,21 @@ executable mnist
       Paths_accelerate_playground
   hs-source-dirs:
       app/mnist
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -rtsopts -threaded -with-rtsopts=-N16
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -O2 -rtsopts -threaded -with-rtsopts=-N16
   build-tool-depends:
       hpack:hpack
   build-depends:
       accelerate
     , accelerate-blas
     , accelerate-io
+    , accelerate-io-bytestring
     , accelerate-io-vector
     , accelerate-llvm
     , accelerate-llvm-native
     , accelerate-llvm-ptx
     , accelerate-playground
     , ad-delcont
+    , attoparsec
     , backprop
     , base >=4.7 && <5
     , bytestring
@@ -139,6 +141,7 @@ executable mnist
     , resourcet
     , rio
     , streaming
+    , streaming-attoparsec
     , streaming-bytestring
     , strict
     , type-natural

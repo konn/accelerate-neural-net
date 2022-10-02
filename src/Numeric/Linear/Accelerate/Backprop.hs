@@ -77,7 +77,7 @@ infixr 8 .*
 infixl 8 /.
 
 (/.) ::
-  (KnownDims dims, A.Fractional a, Reifies s W) =>
+  (KnownDims dims, A.FromIntegral Int a, A.Fractional a, Reifies s W) =>
   BVar s (AccTensor dims a) ->
   BVar s (AccScalar a) ->
   BVar s (AccTensor dims a)
@@ -171,7 +171,7 @@ relu =
       F.relu &&& zipTensorWith (\x d -> (x A.< 0) A.? (0, d))
 
 zipTensorWithBP ::
-  (KnownDims dims, A.Num a, Reifies s W) =>
+  (KnownDims dims, A.Num a, A.FromIntegral Int a, Reifies s W) =>
   ( forall s'.
     Reifies s' W =>
     BVar s' (A.Exp a) ->
@@ -188,7 +188,7 @@ zipTensorWithBP f = liftOp2 $
      in (fxy, \d -> (d * dx, d * dy))
 
 mapTensorBP ::
-  (KnownDims dims, A.Num a, Reifies s W) =>
+  (KnownDims dims, A.FromIntegral Int a, A.Num a, Reifies s W) =>
   ( forall s'.
     Reifies s' W =>
     BVar s' (A.Exp a) ->
@@ -203,7 +203,16 @@ mapTensorBP f =
       . unzipTensor
       . mapTensor (A.lift . NumBP.backprop f)
 
-softmax :: (KnownNat n, KnownNat m, A.Floating a, Reifies s W) => BVar s (AccMatrix n m a) -> BVar s (AccMatrix n m a)
+softmax ::
+  ( KnownNat n
+  , KnownNat m
+  , A.FromIntegral Int a
+  , A.ToFloating Double a
+  , A.Floating a
+  , Reifies s W
+  ) =>
+  BVar s (AccMatrix n m a) ->
+  BVar s (AccMatrix n m a)
 {-# INLINE softmax #-}
 softmax us =
   let exps = exp us

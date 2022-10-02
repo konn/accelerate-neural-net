@@ -116,7 +116,7 @@ infix 7 ><
 {-# INLINE (><) #-}
 (><) = coerce (ABlas.><)
 
-softmax :: (KnownNat n, KnownNat m, A.Floating a) => AccMatrix n m a -> AccMatrix n m a
+softmax :: (KnownNat n, KnownNat m, A.Floating a, ToFloating Double a, FromIntegral Int a) => AccMatrix n m a -> AccMatrix n m a
 {-# INLINE softmax #-}
 softmax us =
   let exps = exp us

@@ -25,6 +25,7 @@ module Numeric.Linear.Accelerate.Internal
     AccTensor (..),
     RawTensor (..),
     KnownDims (..),
+    theShape,
     SDims (..),
     sizeDims,
     repeatedScalar,
@@ -53,7 +54,7 @@ dimVal = P.fromIntegral $ natVal @n Proxy
 
 type SDims :: [Nat] -> Type
 data SDims dims where
-  SZ :: SDims '[]
+  SNil :: SDims '[]
   (:%) :: SNat n -> SDims ns -> SDims (n ': ns)
 
 infixr 9 :%
@@ -71,10 +72,31 @@ deriving newtype instance (KnownDims dims, A.Elt a) => NFData (RawTensor dims a)
 deriving newtype instance
   (KnownDims dims, A.Elt a) => Arrays (RawTensor dims a)
 
+data SShape a where
+  SZ :: SShape Z
+  (:%.) :: SShape acc -> Int -> SShape (acc :. Int)
+
+infixl 3 :%.
+
+fromSShape :: SShape a -> a
+fromSShape SZ = Z
+fromSShape (acc :%. n) = fromSShape acc :. n
+
+sToShape' :: SShape sh -> SDims dims -> SShape (ToShape' sh dims)
+sToShape' acc SNil = acc
+sToShape' acc (n :% ns) = sToShape' (acc :%. P.fromIntegral (toNatural n)) ns
+
+theShape :: forall dims. KnownDims dims => ToShape dims
+theShape = fromSShape $ sToShape' SZ (sDims @dims)
+
 type ToShape :: [Nat] -> Type
-type family ToShape dims where
-  ToShape '[] = Z
-  ToShape (n ': ns) = ToShape ns :. Int
+
+type ToShape dims = ToShape' Z dims
+
+type ToShape' :: Type -> [Nat] -> Type
+type family ToShape' acc dims where
+  ToShape' acc '[] = acc
+  ToShape' acc (n ': ns) = ToShape' (acc :. Int) ns
 
 deriving instance (KnownDims dims, Elt a, Show a) => Show (RawTensor dims a)
 
@@ -94,26 +116,31 @@ class
   KnownDims dims
   where
   sDims :: SDims dims
-  theShape :: ToShape dims
 
 sizeDims :: forall dims. KnownDims dims => Int
 sizeDims = go $ sDims @dims
   where
     go :: SDims ds -> Int
-    go SZ = 1
+    go SNil = 1
     go (sn :% sd') = P.fromIntegral (toNatural sn) * go sd'
 
 instance KnownDims '[] where
-  sDims = SZ
+  sDims = SNil
   {-# INLINE sDims #-}
-  theShape = Z
-  {-# INLINE theShape #-}
 
-instance (KnownNat n, KnownDims ns) => KnownDims (n ': ns) where
+instance
+  ( KnownNat n
+  , KnownDims ns
+  , A.Elt (A.Plain (ToShape (n ': ns)))
+  , Shape (ToShape (n ': ns))
+  , Slice (ToShape (n ': ns))
+  , Plain (ToShape (n ': ns)) ~ ToShape (n ': ns)
+  , P.Eq (A.CoSliceShape (A.CoSliceShape (ToShape (n ': ns))))
+  ) =>
+  KnownDims (n ': ns)
+  where
   sDims = sNat :% sDims
   {-# INLINE sDims #-}
-  theShape = theShape @ns :. P.fromIntegral (natVal @n Proxy)
-  {-# INLINE theShape #-}
 
 type KnownDims' :: [Nat] -> Constraint
 type family KnownDims' ns where
@@ -121,14 +148,14 @@ type family KnownDims' ns where
   KnownDims' (n ': ns) = (KnownNat n, KnownDims ns)
 
 instance (KnownDims dims, A.Num a) => Backprop (AccTensor dims a) where
-  zero = const 0
+  zero = const $ repeatedExp 0
   {-# INLINE zero #-}
-  one = const 1
+  one = const $ repeatedExp 1
   {-# INLINE one #-}
-  add = (+)
+  add = zipTensorWith (+)
   {-# INLINE add #-}
 
-instance (A.Num a, KnownDims dims) => P.Num (AccTensor dims a) where
+instance (A.FromIntegral Int a, A.Num a, KnownDims dims) => P.Num (AccTensor dims a) where
   (+) = zipTensorWith (+)
   {-# INLINE (+) #-}
   (-) = zipTensorWith (-)
@@ -139,20 +166,27 @@ instance (A.Num a, KnownDims dims) => P.Num (AccTensor dims a) where
   {-# INLINE abs #-}
   signum = mapTensor signum
   {-# INLINE signum #-}
-  fromInteger = repeatedExp . P.fromInteger
+  fromInteger = repeatedExp . A.fromIntegral . A.constant . P.fromInteger @Int
   {-# INLINE fromInteger #-}
   negate = mapTensor negate
   {-# INLINE negate #-}
 
-instance (A.Fractional a, KnownDims dims) => P.Fractional (AccTensor dims a) where
-  fromRational = repeatedExp . P.fromRational
+instance (A.FromIntegral Int a, A.ToFloating Double a, A.Floating a, KnownDims dims) => P.Fractional (AccTensor dims a) where
+  fromRational = repeatedExp . A.toFloating . A.constant . P.fromRational @Double
   {-# INLINE fromRational #-}
   (/) = zipTensorWith (/)
   {-# INLINE (/) #-}
   recip = mapTensor recip
   {-# INLINE recip #-}
 
-instance (A.Floating a, KnownDims dims) => P.Floating (AccTensor dims a) where
+instance
+  ( A.ToFloating Double a
+  , A.FromIntegral Int a
+  , A.Floating a
+  , KnownDims dims
+  ) =>
+  P.Floating (AccTensor dims a)
+  where
   pi = repeatedExp pi
   exp = mapTensor exp
   {-# INLINE exp #-}
@@ -228,11 +262,11 @@ foldTensor ::
 foldTensor = coerce $ foldAll @(ToShape dims)
 
 instance (KnownDims dims, A.Num a) => Additive (AccTensor dims a) where
-  (^+^) = (+)
+  (^+^) = add
   {-# INLINE (^+^) #-}
 
 instance
-  (KnownDims dims, A.Num a) =>
+  (KnownDims dims, A.Num a, FromIntegral Int a) =>
   VectorSpace (AccTensor '[] a) (AccTensor dims a)
   where
   (*^) = coerce $ A.zipWith (*) . A.replicate (constant $ theShape @dims)

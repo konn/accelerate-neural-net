@@ -55,6 +55,7 @@ module Numeric.Linear.Accelerate
     ToShape,
     SDims (..),
     KnownDims (..),
+    theShape,
     (|||),
   )
 where
@@ -72,7 +73,7 @@ default (Int)
 
 type MatrixOf :: ([Nat] -> k) -> Nat -> Nat -> k
 
-type MatrixOf tensor i o = tensor '[i, o]
+type MatrixOf tensor i o = tensor '[o, i]
 
 type VectorOf :: ([Nat] -> k) -> Nat -> k
 

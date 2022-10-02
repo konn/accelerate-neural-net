@@ -55,6 +55,7 @@ ghc-options:
 - -Wmissing-home-modules
 - -Wpartial-fields
 - -Wredundant-constraints
+- -O2
 
 build-tools: hpack
 
@@ -75,7 +76,9 @@ executables:
     dependencies:
     - accelerate-playground
     - accelerate-io
+    - accelerate-io-bytestring
     - accelerate-io-vector
+    - attoparsec
     - compact
     - filepath
     - foldl
@@ -87,6 +90,7 @@ executables:
     - rio
     - streaming
     - streaming-bytestring
+    - streaming-attoparsec
     - vector
 
   accelerate-playground-exe:
