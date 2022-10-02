@@ -5,6 +5,7 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
@@ -23,16 +24,13 @@ import Control.Monad (when)
 import Control.Monad.Trans.Resource (MonadResource, runResourceT)
 import qualified Data.Array.Accelerate as A
 import qualified Data.Array.Accelerate.IO.Data.Vector.Unboxed as VA
-import qualified Data.Array.Accelerate.LLVM.PTX as Backend
--- import qualified Data.Array.Accelerate.LLVM.Native as Backend
+import qualified Data.Array.Accelerate.LLVM.Native as CPU
+import qualified Data.Array.Accelerate.LLVM.PTX as GPU
 import Data.Format.MNIST
 import Data.Function ((&))
 import Data.Functor.Of (Of)
 import qualified Data.Heap as H
-import Data.Massiv.Array (MonadUnliftIO)
 import qualified Data.Massiv.Array as M
-import qualified Data.Massiv.Array as MA
-import qualified Data.Massiv.Vector as MV
 import qualified Data.Massiv.Vector as VM
 import Data.Proxy (Proxy)
 import Data.Strict.Tuple (Pair (..))
@@ -45,7 +43,7 @@ import GHC.TypeNats
 import Numeric.Linear.Accelerate
 import Numeric.Natural (Natural)
 import qualified Options.Applicative as Opts
-import RIO (MonadTrans (..), NFData (..), PrimMonad, evaluateDeep, fromMaybe, liftIO)
+import RIO (MonadTrans (..), MonadUnliftIO, NFData (..), PrimMonad, evaluateDeep, fromMaybe, liftIO)
 import RIO.FilePath ((</>))
 import qualified Streaming as SS
 import qualified Streaming.ByteString as Q
@@ -62,8 +60,24 @@ data TrainOpts = TrainOpts
   , timeStep :: !Float
   , dumping :: !Float
   , digitsDir :: !(Maybe FilePath)
+  , backend :: !Backend
   }
   deriving (Show, Eq, Ord, Generic)
+
+data Backend = GPU | CPU
+  deriving (Show, Read, Eq, Ord, Generic)
+
+runBackend ::
+  Backend ->
+  (forall arrays. A.Arrays arrays => A.Acc arrays -> arrays)
+runBackend GPU = GPU.run
+runBackend CPU = CPU.run
+
+runBackend1 ::
+  Backend ->
+  (forall arrays arrays'. (A.Arrays arrays, A.Arrays arrays') => (A.Acc arrays -> A.Acc arrays') -> arrays -> arrays')
+runBackend1 GPU = GPU.run1
+runBackend1 CPU = CPU.run1
 
 main :: IO ()
 main = do
@@ -74,7 +88,7 @@ main = do
       seed = AtomicGen g'
 
   nn0 <- randomNN @Pixels @BatchedNet @10 @Float =<< newAtomicGenM nnGen
-  !acc <- calcAccuracy batchSize testPath nn0
+  !acc <- calcAccuracy backend batchSize testPath nn0
   liftIO $ putStrLn $ printf "Initial accuracy %f%%" (acc * 100)
   hdr@ImageFileHeader {..} <-
     evaluateDeep =<< runResourceT (fst <$> loadDataSetStream trainPath)
@@ -101,13 +115,13 @@ main = do
                   st
                     & shuffleBuffered' g shuffWindow
                     & SS.chunksOf batchSize
-                    & S.mapped (L.impurely S.foldM $ someCasesL hdr)
+                    & S.mapped (L.impurely S.foldM $ someCasesL backend hdr)
                     & S.fold_ (flip $ trainMNIST trOpts) curNN id
             )
             net
             (B.replicate eps ())
         putStrLn $ printf "Epoch %d Done." cur'
-        acc' <- calcAccuracy batchSize testPath net'
+        acc' <- calcAccuracy backend batchSize testPath net'
         putStrLn $ printf "Test Accuracy at Epoch %d: %f%%" cur' (acc' * 100)
         pure $! (cur + eps) :!: net'
     )
@@ -122,14 +136,14 @@ trainMNIST ::
   NeuralNetwork 784 ns 10 RawTensor Float ->
   NeuralNetwork 784 ns 10 RawTensor Float
 trainMNIST TrainOpts {..} (MkSomeCases inps exps _) =
-  trainGDWith Backend.run timeStep dumping 1 crossEntropy (inps, exps)
+  trainGDWith (runBackend backend) timeStep dumping 1 crossEntropy (inps, exps)
 
-calcAccuracy :: Int -> FilePath -> NeuralNetwork 784 BatchedNet 10 RawTensor Float -> IO Double
-calcAccuracy size fp nn = runResourceT $ do
+calcAccuracy :: Backend -> Int -> FilePath -> NeuralNetwork 784 BatchedNet 10 RawTensor Float -> IO Double
+calcAccuracy mode size fp nn = runResourceT $ do
   (testInfo, st) <- loadDataSetStream fp
   st & SS.chunksOf size
-    & S.mapped (L.impurely S.foldM $ someCasesL testInfo)
-    & S.map (toAccuracyStat nn)
+    & S.mapped (L.impurely S.foldM $ someCasesL mode testInfo)
+    & S.map (toAccuracyStat mode nn)
     & L.purely S.fold_ (L.foldMap id accuracy)
 
 data AccuracyStatistics = AS {count :: !Int, correct :: !Int}
@@ -147,8 +161,8 @@ accuracy :: AccuracyStatistics -> Double
 {-# INLINE accuracy #-}
 accuracy = (/) <$> fromIntegral . correct <*> fromIntegral . count
 
-toAccuracyStat :: NeuralNetwork 784 hs 10 RawTensor Float -> SomeCases 784 10 -> AccuracyStatistics
-toAccuracyStat nn (MkSomeCases inps _ exps) =
+toAccuracyStat :: Backend -> NeuralNetwork 784 hs 10 RawTensor Float -> SomeCases 784 10 -> AccuracyStatistics
+toAccuracyStat mode nn (MkSomeCases inps _ exps) =
   let preds =
         M.map fst $
           M.ifoldlWithin
@@ -159,7 +173,7 @@ toAccuracyStat nn (MkSomeCases inps _ exps) =
                   else (idx, w)
             )
             (D0, -1 / 0)
-            $ fromRawAccMatrix $ evalNNWith Backend.run1 nn inps
+            $ fromRawAccMatrix $ evalNNWith (runBackend1 mode) nn inps
    in M.foldMono (\p -> AS {count = 1, correct = if p then 1 else 0}) $
         M.zipWith (==) preds exps
 
@@ -185,9 +199,10 @@ type Pixels = 28 * 28
 
 someCasesL ::
   PrimMonad m =>
+  Backend ->
   ImageFileHeader ->
   L.FoldM m (Image, Digit) (SomeCases Pixels 10)
-someCasesL ImageFileHeader {..} =
+someCasesL mode ImageFileHeader {..} =
   mkSomeCase
     <$> L.generalize L.genericLength
     <*> L.premapM (pure . fst) L.vectorM
@@ -199,24 +214,24 @@ someCasesL ImageFileHeader {..} =
       MkSomeCases @0
         (repeatRaw 0)
         (repeatRaw 0)
-        (MV.fromUnboxedVector M.Par ds)
+        (M.fromUnboxedVector M.Par ds)
     mkSomeCase m ins outs =
       case (someNatVal m, someNatVal $ fromIntegral pixels) of
         (SomeNat (_ :: Proxy m), SomeNat (_ :: Proxy i)) ->
           MkSomeCases @m
             ( toRawTensor' "input" $
-                massivToAccel $
-                  M.compute $
+                massivToAccel mode $
+                  M.computeP $
                     M.concat' 1 $
                       M.fromBoxedVector $
                         V.map (M.resize' (M.Sz2 pixels 1) . M.map ((0.5 -) . (/ 255) . realToFrac)) ins
             )
             ( toRawTensor' "output" $
-                massivToAccel $
+                massivToAccel mode $
                   M.computeP $
                     M.concat' 1 $
                       M.map (M.resize' (M.Sz2 10 1) . digitVector) $
-                        MV.fromUnboxedVector MV.Par outs
+                        M.fromUnboxedVector M.Par outs
             )
             (M.fromUnboxedVector M.Par outs)
 
@@ -234,15 +249,15 @@ toRawTensor' lab arr =
     )
     $ toRawTensor arr
 
-massivToAccel :: M.Matrix M.U Float -> A.Array A.DIM2 Float
-massivToAccel mmat =
-  Backend.run
+massivToAccel :: Backend -> M.Matrix M.U Float -> A.Array A.DIM2 Float
+massivToAccel mode mmat =
+  runBackend mode
     . A.reshape (A.constant $ toMatShape $ M.size mmat)
     . A.use
     . VA.fromUnboxed
     $ M.toUnboxedVector mmat
 
-toMatShape :: MA.Sz MA.Ix2 -> A.DIM2
+toMatShape :: M.Sz M.Ix2 -> A.DIM2
 toMatShape (M.Sz2 l r) = A.Z A.:. l A.:. r
 
 digitVector :: Digit -> M.Vector M.D Float
@@ -337,6 +352,10 @@ trainOptsP = Opts.info (Opts.helper <*> p) mempty
               <> Opts.help
                 "When specified, guesses the digit in the \
                 \given directory at each output timing"
+      backend <-
+        Opts.option Opts.auto $
+          Opts.long "backend" <> Opts.value GPU <> Opts.showDefault
+            <> Opts.help "The backend for the Accelerate"
       pure TrainOpts {..}
 
 -- | A variant using priority queue

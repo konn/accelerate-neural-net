@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.34.6.
+-- This file has been generated from package.yaml by hpack version 0.35.0.
 --
 -- see: https://github.com/sol/hpack
 
@@ -70,7 +70,7 @@ executable accelerate-playground-exe
       Paths_accelerate_playground
   hs-source-dirs:
       app/playground
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -rtsopts -threaded -with-rtsopts=-N16 -fllvm
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -rtsopts -threaded -with-rtsopts=-N16
   build-tool-depends:
       hpack:hpack
   build-depends:
@@ -107,7 +107,7 @@ executable mnist
       Paths_accelerate_playground
   hs-source-dirs:
       app/mnist
-  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -rtsopts -threaded -with-rtsopts=-N -fllvm
+  ghc-options: -Wall -Wcompat -Widentities -Wincomplete-record-updates -Wincomplete-uni-patterns -Wmissing-export-lists -Wmissing-home-modules -Wpartial-fields -Wredundant-constraints -O2 -rtsopts -threaded -with-rtsopts=-N16
   build-tool-depends:
       hpack:hpack
   build-depends:

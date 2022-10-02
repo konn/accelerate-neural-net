@@ -71,8 +71,7 @@ executables:
     - -O2
     - -rtsopts
     - -threaded
-    - -with-rtsopts=-N
-    - -fllvm
+    - -with-rtsopts=-N16
     dependencies:
     - accelerate-playground
     - accelerate-io
@@ -98,6 +97,5 @@ executables:
     - -rtsopts
     - -threaded
     - -with-rtsopts=-N16
-    - -fllvm
     dependencies:
     - accelerate-playground
